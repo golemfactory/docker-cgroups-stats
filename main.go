@@ -99,11 +99,12 @@ func main() {
     flag.Parse()
 
     exitCode := runSubprocess(flag.Args())
-    if exitCode != 0 {
-        os.Exit(exitCode)
-    }
 
     stats := getCgroupsStats()
     writeStats(stats, *outputPath)
+
+    if exitCode != 0 {
+        os.Exit(exitCode)
+    }
 }
 
