@@ -1,11 +1,11 @@
 # docker-cgroups-stats
 
-A wrapper which runs an arbitrary command passed to it and outputs statistics from certain Cgroup subsystems once the wrapped program exits.
-Cgroups stats are saved in JSON format to a file specified as a command-line flag.
+A wrapper which runs an arbitrary command passed to it and outputs statistics from certain cgroups subsystems once the wrapped program exits.
+Cgroups stats are saved in JSON format to a file specified as a command-line argument.
 
 The program is meant to be run inside Docker containers to collect the overall system resource usage of the container's entrypoint.
 
-The Cgroup subsystems which are currently included in the command's output are:
+The cgroups subsystems which are currently included in the command's output are:
 - `cpu`
 - `cpuacct`
 - `cpuset`
