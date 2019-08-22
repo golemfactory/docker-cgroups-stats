@@ -19,30 +19,35 @@ func exit(errorMsg string, args ...interface{}) {
 	os.Exit(1)
 }
 
-func getCgroupMountpoints(subsystems []string) map[string]string {
+func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
 	subsystemsToPaths := make(map[string]string)
 
 	for _, name := range subsystems {
 		path, err := cgroups.FindCgroupMountpoint(name)
-		if err != nil {
-			exit("Could not find mountpoint for cgroup: %s. %s", name, err)
-		}
+        if err != nil {
+            return nil, err
+        }
 
 		subsystemsToPaths[name] = path
 	}
 
-	return subsystemsToPaths
+	return subsystemsToPaths, nil
 }
 
-func getCgroupsStats(subsystems []string) *cgroups.Stats {
-	manager := fs.Manager{Paths: getCgroupMountpoints(subsystems)}
+func getCgroupsStats(subsystems []string) (*cgroups.Stats, error) {
+    mountpoints, err := getCgroupMountpoints(subsystems)
+    if err != nil {
+        return nil, err
+    }
+
+	manager := fs.Manager{Paths: mountpoints}
 
 	stats, err := manager.GetStats()
 	if err != nil {
-		exit("Failed to get cgroups stats. %s", err)
+        return nil, err
 	}
 
-	return stats
+	return stats, nil
 }
 
 func runSubprocess(args []string) int {
@@ -97,10 +102,12 @@ func main() {
 
 	exitCode := runSubprocess(flag.Args())
 
-	stats := getCgroupsStats(strings.Split(*subsystems, ","))
-	writeStats(stats, *outputPath)
+	stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
+    } else {
+        writeStats(stats, *outputPath)
+    }
 
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
+    os.Exit(exitCode)
 }
