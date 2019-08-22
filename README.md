@@ -5,15 +5,15 @@ Cgroups stats are saved in JSON format to a file specified as a command-line arg
 
 The program is meant to be run inside Docker containers to collect the overall system resource usage of the container's entrypoint.
 
-The cgroups subsystems which are currently included in the command's output are:
-- `cpu`
+The cgroups subsystems which are included in the stats by default are:
 - `cpuacct`
-- `cpuset`
 - `memory`
+
+Default subsystems can be overridden via the `-s` flag.
 
 ## Example usage
 ```
-./docker-cgroups-stats -o /tmp/output.json /bin/sleep 5
+./docker-cgroups-stats -o /tmp/output.json -s cpuacct,memory,blkio /bin/sleep 5
 ```
 
 ## Building
