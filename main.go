@@ -9,24 +9,20 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 )
 
-var groupsToInclude = []string{
-	"cpuset",
-	"cpu",
-	"cpuacct",
-	"memory",
-}
+const defaultSubsystems = "cpuacct,memory"
 
 func exit(errorMsg string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, errorMsg+"\n", args...)
 	os.Exit(1)
 }
 
-func getCgroupMountpoints() map[string]string {
+func getCgroupMountpoints(subsystems []string) map[string]string {
 	subsystemsToPaths := make(map[string]string)
 
-	for _, name := range groupsToInclude {
+	for _, name := range subsystems {
 		path, err := cgroups.FindCgroupMountpoint(name)
 		if err != nil {
 			exit("Could not find mountpoint for cgroup: %s. %s", name, err)
@@ -38,8 +34,8 @@ func getCgroupMountpoints() map[string]string {
 	return subsystemsToPaths
 }
 
-func getCgroupsStats() *cgroups.Stats {
-	manager := fs.Manager{Paths: getCgroupMountpoints()}
+func getCgroupsStats(subsystems []string) *cgroups.Stats {
+	manager := fs.Manager{Paths: getCgroupMountpoints(subsystems)}
 
 	stats, err := manager.GetStats()
 	if err != nil {
@@ -95,11 +91,13 @@ func writeStats(stats *cgroups.Stats, outputPath string) {
 
 func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
+	subsystems := flag.String("s", defaultSubsystems,
+		"cgroup subsystems to be included in the stats (as comma-separated strings)")
 	flag.Parse()
 
 	exitCode := runSubprocess(flag.Args())
 
-	stats := getCgroupsStats()
+	stats := getCgroupsStats(strings.Split(*subsystems, ","))
 	writeStats(stats, *outputPath)
 
 	if exitCode != 0 {
