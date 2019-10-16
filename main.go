@@ -56,14 +56,13 @@ func runSubprocess(args []string) int {
 	subprocess.Stdout = os.Stdout
 	subprocess.Stderr = os.Stderr
 
-	signalChan := make(chan os.Signal)
+	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan)
-
-	go func() {
-		for sig := range signalChan {
+	go func(c chan os.Signal) {
+		for sig := range c {
 			subprocess.Process.Signal(sig)
 		}
-	}()
+	}(signalChan)
 
 	if err := subprocess.Run(); err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
