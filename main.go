@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/opencontainers/runc/libcontainer/cgroups/fs"
+    "math"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
+    "syscall"
+    "time"
 )
 
 const defaultSubsystems = "cpuacct,memory"
@@ -50,6 +53,19 @@ func getCgroupsStats(subsystems []string) (*cgroups.Stats, error) {
 	return stats, nil
 }
 
+func isBudgetExceeded(state *os.ProcessState, budget uint64) bool {
+    userTime := state.UserTime()
+    systemTime := state.SystemTime()
+    total := time.Duration(userTime.Nanoseconds() + systemTime.Nanoseconds())
+    budgetSec := time.Duration(budget) * time.Second
+
+    if total.Round(time.Duration(time.Second)) >= budgetSec {
+        return true
+    }
+
+    return false
+}
+
 func runSubprocess(args []string) (*os.ProcessState, int) {
 	subprocess := exec.Command(args[0], args[1:]...)
 	subprocess.Stdin = os.Stdin
@@ -77,6 +93,14 @@ func runSubprocess(args []string) (*os.ProcessState, int) {
 	return state, 0
 }
 
+func setCpuLimit(limitSec uint64) {
+    var limit = syscall.Rlimit{Cur: limitSec, Max: limitSec}
+    err := syscall.Setrlimit(syscall.RLIMIT_CPU, &limit)
+    if err != nil {
+        exit("Failed setting CPU limit. %s", err)
+    }
+}
+
 func writeStats(stats *cgroups.Stats, outputPath string) {
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
@@ -99,15 +123,25 @@ func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
+    useCgroups := flag.Bool("cgroups", false, "should the program's output include stats from cgroups")
+    cpuBudget := flag.Uint64("b", math.MaxUint64, "CPU budget for the subprocess (in seconds)")
 	flag.Parse()
 
-	_, exitCode := runSubprocess(flag.Args())
+    setCpuLimit(*cpuBudget)
+	state, exitCode := runSubprocess(flag.Args())
 
-	stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
-    } else {
-        writeStats(stats, *outputPath)
+    if exitCode != 0 && isBudgetExceeded(state, *cpuBudget) {
+        // TODO report budget exceeded
+        fmt.Println("budget exceeded")
+    }
+
+    if *useCgroups {
+        stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
+        if err != nil {
+            fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
+        } else {
+            writeStats(stats, *outputPath)
+        }
     }
 
     os.Exit(exitCode)
