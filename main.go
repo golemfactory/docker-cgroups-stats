@@ -50,7 +50,7 @@ func getCgroupsStats(subsystems []string) (*cgroups.Stats, error) {
 	return stats, nil
 }
 
-func runSubprocess(args []string) int {
+func runSubprocess(args []string) (*os.ProcessState, int) {
 	subprocess := exec.Command(args[0], args[1:]...)
 	subprocess.Stdin = os.Stdin
 	subprocess.Stdout = os.Stdout
@@ -64,15 +64,17 @@ func runSubprocess(args []string) int {
 		}
 	}(signalChan)
 
-	if err := subprocess.Run(); err != nil {
+    err := subprocess.Run()
+    state := subprocess.ProcessState
+    if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
-			return exitError.ExitCode()
+			return state, exitError.ExitCode()
 		}
 
-		return 1
-	}
+        return state, 1
+    }
 
-	return 0
+	return state, 0
 }
 
 func writeStats(stats *cgroups.Stats, outputPath string) {
@@ -99,7 +101,7 @@ func main() {
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
 	flag.Parse()
 
-	exitCode := runSubprocess(flag.Args())
+	_, exitCode := runSubprocess(flag.Args())
 
 	stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
     if err != nil {
