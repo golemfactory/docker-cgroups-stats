@@ -15,6 +15,7 @@ import (
     "time"
 )
 
+const exitCodeBudgetExceeded = 101
 const defaultSubsystems = "cpuacct,memory"
 
 func exit(errorMsg string, args ...interface{}) {
@@ -123,25 +124,22 @@ func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
-    useCgroups := flag.Bool("cgroups", false, "should the program's output include stats from cgroups")
     cpuBudget := flag.Uint64("b", math.MaxUint64, "CPU budget for the subprocess (in seconds)")
 	flag.Parse()
 
     setCpuLimit(*cpuBudget)
 	state, exitCode := runSubprocess(flag.Args())
 
-    if exitCode != 0 && isBudgetExceeded(state, *cpuBudget) {
-        // TODO report budget exceeded
-        fmt.Println("budget exceeded")
+    stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
+    } else {
+        writeStats(stats, *outputPath)
     }
 
-    if *useCgroups {
-        stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
-        if err != nil {
-            fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
-        } else {
-            writeStats(stats, *outputPath)
-        }
+    if exitCode != 0 && isBudgetExceeded(state, *cpuBudget) {
+        fmt.Fprintln(os.Stderr, "CPU budget exceeded.")
+        os.Exit(exitCodeBudgetExceeded)
     }
 
     os.Exit(exitCode)
