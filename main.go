@@ -18,9 +18,8 @@ import (
 const exitCodeBudgetExceeded = 101
 const defaultSubsystems = "cpuacct,memory"
 
-func exit(errorMsg string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, errorMsg+"\n", args...)
-	os.Exit(1)
+func printErr(msg string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, msg+"\n", args...)
 }
 
 func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
@@ -94,30 +93,25 @@ func runSubprocess(args []string) (*os.ProcessState, int) {
 	return state, 0
 }
 
-func setCpuLimit(limitSec uint64) {
+func setCpuLimit(limitSec uint64) error {
     var limit = syscall.Rlimit{Cur: limitSec, Max: limitSec}
-    err := syscall.Setrlimit(syscall.RLIMIT_CPU, &limit)
-    if err != nil {
-        exit("Failed setting CPU limit. %s", err)
-    }
+    return syscall.Setrlimit(syscall.RLIMIT_CPU, &limit)
 }
 
-func writeStats(stats *cgroups.Stats, outputPath string) {
+func writeStats(stats *cgroups.Stats, outputPath string) error {
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
-		exit("Could not create output file. %s", err)
+        return err
 	}
 	defer outputFile.Close()
 
 	statsJson, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
-		exit("Failed to serialize stats. %s", err)
+        return err
 	}
 
 	_, err = outputFile.Write(statsJson)
-	if err != nil {
-		exit("Failed writing stats to output file. %s", err)
-	}
+    return err
 }
 
 func main() {
@@ -127,18 +121,24 @@ func main() {
     cpuBudget := flag.Uint64("b", math.MaxUint64, "CPU budget for the subprocess (in seconds)")
 	flag.Parse()
 
-    setCpuLimit(*cpuBudget)
+    err := setCpuLimit(*cpuBudget)
+    if err != nil {
+        printErr("Setting CPU limit failed. %s", err)
+    }
 	state, exitCode := runSubprocess(flag.Args())
 
     stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
     if err != nil {
-        fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
+        printErr("Could not obtain cgroups stats. %s", err)
     } else {
-        writeStats(stats, *outputPath)
+        err := writeStats(stats, *outputPath)
+        if err != nil {
+            printErr("Writing stats file failed. %s", err)
+        }
     }
 
     if exitCode != 0 && isBudgetExceeded(state, *cpuBudget) {
-        fmt.Fprintln(os.Stderr, "CPU budget exceeded.")
+        printErr("CPU budget exceeded.")
         os.Exit(exitCodeBudgetExceeded)
     }
 
