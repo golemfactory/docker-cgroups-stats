@@ -16,6 +16,7 @@ import (
 )
 
 const exitCodeBudgetExceeded = 101
+const exitCodeEmptyArgs = 2
 const defaultSubsystems = "cpuacct,memory"
 
 func printErr(msg string, args ...interface{}) {
@@ -119,6 +120,13 @@ func main() {
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
     cpuBudget := flag.Uint64("b", math.MaxUint64, "CPU budget for the subprocess (in seconds)")
+
+    if len(os.Args) == 1 {
+        fmt.Fprintf(os.Stderr, "Usage:\n")
+        flag.PrintDefaults()
+        os.Exit(exitCodeEmptyArgs)
+    }
+
 	flag.Parse()
 
     err := setCpuLimit(*cpuBudget)
