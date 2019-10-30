@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/opencontainers/runc/libcontainer/cgroups/fs"
+    "log"
     "math"
 	"os"
 	"os/exec"
@@ -15,12 +16,14 @@ import (
     "time"
 )
 
+const defaultSubsystems = "cpuacct,memory"
 const exitCodeBudgetExceeded = 101
 const exitCodeEmptyArgs = 2
-const defaultSubsystems = "cpuacct,memory"
+
+var errLogger = log.New(os.Stderr, "docker-cgroups-stats: ", log.LstdFlags | log.LUTC)
 
 func printErr(msg string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, msg+"\n", args...)
+    errLogger.Printf(msg+"\n", args...)
 }
 
 func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
