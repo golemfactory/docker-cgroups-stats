@@ -17,7 +17,7 @@ import (
 )
 
 const defaultSubsystems = "cpuacct,memory"
-const exitCodeBudgetExceeded = 111
+const exitCodeCpuLimitExceeded = 111
 const exitCodeEmptyArgs = 2
 
 var errLogger = log.New(os.Stderr, "docker-cgroups-stats: ", log.LstdFlags | log.LUTC)
@@ -57,13 +57,13 @@ func getCgroupsStats(subsystems []string) (*cgroups.Stats, error) {
 	return stats, nil
 }
 
-func isBudgetExceeded(state *os.ProcessState, budget uint64) bool {
+func isCpuLimitExceeded(state *os.ProcessState, cpuLimit uint64) bool {
     userTime := state.UserTime()
     systemTime := state.SystemTime()
     total := time.Duration(userTime.Nanoseconds() + systemTime.Nanoseconds())
-    budgetSec := time.Duration(budget) * time.Second
+    cpuLimitSec := time.Duration(cpuLimit) * time.Second
 
-    if total.Round(time.Duration(time.Second)) >= budgetSec {
+    if total.Round(time.Duration(time.Second)) >= cpuLimitSec {
         return true
     }
 
@@ -122,7 +122,7 @@ func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
-    cpuBudget := flag.Uint64("b", math.MaxUint64, "CPU budget for the subprocess (in seconds)")
+    cpuLimit := flag.Uint64("b", math.MaxUint64, "CPU usage limit for the subprocess (in seconds)")
 
     if len(os.Args) == 1 {
         fmt.Fprintf(os.Stderr, "Usage:\n")
@@ -132,7 +132,7 @@ func main() {
 
 	flag.Parse()
 
-    err := setCpuLimit(*cpuBudget)
+    err := setCpuLimit(*cpuLimit)
     if err != nil {
         printErr("Setting CPU limit failed. %s", err)
     }
@@ -148,9 +148,9 @@ func main() {
         }
     }
 
-    if exitCode != 0 && isBudgetExceeded(state, *cpuBudget) {
-        printErr("CPU budget exceeded.")
-        os.Exit(exitCodeBudgetExceeded)
+    if exitCode != 0 && isCpuLimitExceeded(state, *cpuLimit) {
+        printErr("CPU limit exceeded.")
+        os.Exit(exitCodeCpuLimitExceeded)
     }
 
     os.Exit(exitCode)
