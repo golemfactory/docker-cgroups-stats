@@ -122,7 +122,7 @@ func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
-    cpuLimit := flag.Uint64("b", math.MaxUint64, "CPU usage limit for the subprocess (in seconds)")
+    cpuLimit := flag.Uint64("l", math.MaxUint64, "CPU usage limit for the subprocess (in seconds)")
 
     if len(os.Args) == 1 {
         fmt.Fprintf(os.Stderr, "Usage:\n")
