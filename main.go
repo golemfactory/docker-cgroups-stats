@@ -17,7 +17,7 @@ import (
 )
 
 const defaultSubsystems = "cpuacct,memory"
-const exitCodeBudgetExceeded = 101
+const exitCodeBudgetExceeded = 111
 const exitCodeEmptyArgs = 2
 
 var errLogger = log.New(os.Stderr, "docker-cgroups-stats: ", log.LstdFlags | log.LUTC)
