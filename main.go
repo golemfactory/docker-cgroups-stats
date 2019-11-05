@@ -6,17 +6,24 @@ import (
 	"fmt"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/opencontainers/runc/libcontainer/cgroups/fs"
+	"log"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const defaultSubsystems = "cpuacct,memory"
+const exitCodeCpuLimitExceeded = 111
+const exitCodeEmptyArgs = 2
 
-func exit(errorMsg string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, errorMsg+"\n", args...)
-	os.Exit(1)
+var errLogger = log.New(os.Stderr, "docker-cgroups-stats: ", log.LstdFlags|log.LUTC)
+
+func printErr(msg string, args ...interface{}) {
+	errLogger.Printf(msg+"\n", args...)
 }
 
 func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
@@ -24,9 +31,9 @@ func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
 
 	for _, name := range subsystems {
 		path, err := cgroups.FindCgroupMountpoint(name)
-        if err != nil {
-            return nil, err
-        }
+		if err != nil {
+			return nil, err
+		}
 
 		subsystemsToPaths[name] = path
 	}
@@ -35,22 +42,35 @@ func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
 }
 
 func getCgroupsStats(subsystems []string) (*cgroups.Stats, error) {
-    mountpoints, err := getCgroupMountpoints(subsystems)
-    if err != nil {
-        return nil, err
-    }
+	mountpoints, err := getCgroupMountpoints(subsystems)
+	if err != nil {
+		return nil, err
+	}
 
 	manager := fs.Manager{Paths: mountpoints}
 
 	stats, err := manager.GetStats()
 	if err != nil {
-        return nil, err
+		return nil, err
 	}
 
 	return stats, nil
 }
 
-func runSubprocess(args []string) int {
+func isCpuLimitExceeded(state *os.ProcessState, cpuLimit uint64) bool {
+	userTime := state.UserTime()
+	systemTime := state.SystemTime()
+	total := time.Duration(userTime.Nanoseconds() + systemTime.Nanoseconds())
+	cpuLimitSec := time.Duration(cpuLimit) * time.Second
+
+	if total.Round(time.Duration(time.Second)) >= cpuLimitSec {
+		return true
+	}
+
+	return false
+}
+
+func runSubprocess(args []string) (*os.ProcessState, int) {
 	subprocess := exec.Command(args[0], args[1:]...)
 	subprocess.Stdin = os.Stdin
 	subprocess.Stdout = os.Stdout
@@ -64,49 +84,74 @@ func runSubprocess(args []string) int {
 		}
 	}(signalChan)
 
-	if err := subprocess.Run(); err != nil {
+	err := subprocess.Run()
+	state := subprocess.ProcessState
+	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
-			return exitError.ExitCode()
+			return state, exitError.ExitCode()
 		}
 
-		return 1
+		return state, 1
 	}
 
-	return 0
+	return state, 0
 }
 
-func writeStats(stats *cgroups.Stats, outputPath string) {
+func setCpuLimit(limitSec uint64) error {
+	var limit = syscall.Rlimit{Cur: limitSec, Max: limitSec}
+	return syscall.Setrlimit(syscall.RLIMIT_CPU, &limit)
+}
+
+func writeStats(stats *cgroups.Stats, outputPath string) error {
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
-		exit("Could not create output file. %s", err)
+		return err
 	}
 	defer outputFile.Close()
 
 	statsJson, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
-		exit("Failed to serialize stats. %s", err)
+		return err
 	}
 
 	_, err = outputFile.Write(statsJson)
-	if err != nil {
-		exit("Failed writing stats to output file. %s", err)
-	}
+	return err
 }
 
 func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
+	cpuLimit := flag.Uint64("l", math.MaxUint64, "CPU usage limit for the subprocess (in seconds)")
+
+	if len(os.Args) == 1 {
+		fmt.Fprintf(os.Stderr, "Usage:\n")
+		flag.PrintDefaults()
+		os.Exit(exitCodeEmptyArgs)
+	}
+
 	flag.Parse()
 
-	exitCode := runSubprocess(flag.Args())
+	err := setCpuLimit(*cpuLimit)
+	if err != nil {
+		printErr("Setting CPU limit failed. %s", err)
+	}
+	state, exitCode := runSubprocess(flag.Args())
 
 	stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
-    if err != nil {
-        fmt.Fprintf(os.Stderr, "Could not obtain cgroups stats. %s\n", err)
-    } else {
-        writeStats(stats, *outputPath)
-    }
+	if err != nil {
+		printErr("Could not obtain cgroups stats. %s", err)
+	} else {
+		err := writeStats(stats, *outputPath)
+		if err != nil {
+			printErr("Writing stats file failed. %s", err)
+		}
+	}
 
-    os.Exit(exitCode)
+	if exitCode != 0 && isCpuLimitExceeded(state, *cpuLimit) {
+		printErr("CPU limit exceeded.")
+		os.Exit(exitCodeCpuLimitExceeded)
+	}
+
+	os.Exit(exitCode)
 }
