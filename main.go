@@ -6,24 +6,24 @@ import (
 	"fmt"
 	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/opencontainers/runc/libcontainer/cgroups/fs"
-    "log"
-    "math"
+	"log"
+	"math"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
-    "syscall"
-    "time"
+	"syscall"
+	"time"
 )
 
 const defaultSubsystems = "cpuacct,memory"
 const exitCodeCpuLimitExceeded = 111
 const exitCodeEmptyArgs = 2
 
-var errLogger = log.New(os.Stderr, "docker-cgroups-stats: ", log.LstdFlags | log.LUTC)
+var errLogger = log.New(os.Stderr, "docker-cgroups-stats: ", log.LstdFlags|log.LUTC)
 
 func printErr(msg string, args ...interface{}) {
-    errLogger.Printf(msg+"\n", args...)
+	errLogger.Printf(msg+"\n", args...)
 }
 
 func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
@@ -31,9 +31,9 @@ func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
 
 	for _, name := range subsystems {
 		path, err := cgroups.FindCgroupMountpoint(name)
-        if err != nil {
-            return nil, err
-        }
+		if err != nil {
+			return nil, err
+		}
 
 		subsystemsToPaths[name] = path
 	}
@@ -42,32 +42,32 @@ func getCgroupMountpoints(subsystems []string) (map[string]string, error) {
 }
 
 func getCgroupsStats(subsystems []string) (*cgroups.Stats, error) {
-    mountpoints, err := getCgroupMountpoints(subsystems)
-    if err != nil {
-        return nil, err
-    }
+	mountpoints, err := getCgroupMountpoints(subsystems)
+	if err != nil {
+		return nil, err
+	}
 
 	manager := fs.Manager{Paths: mountpoints}
 
 	stats, err := manager.GetStats()
 	if err != nil {
-        return nil, err
+		return nil, err
 	}
 
 	return stats, nil
 }
 
 func isCpuLimitExceeded(state *os.ProcessState, cpuLimit uint64) bool {
-    userTime := state.UserTime()
-    systemTime := state.SystemTime()
-    total := time.Duration(userTime.Nanoseconds() + systemTime.Nanoseconds())
-    cpuLimitSec := time.Duration(cpuLimit) * time.Second
+	userTime := state.UserTime()
+	systemTime := state.SystemTime()
+	total := time.Duration(userTime.Nanoseconds() + systemTime.Nanoseconds())
+	cpuLimitSec := time.Duration(cpuLimit) * time.Second
 
-    if total.Round(time.Duration(time.Second)) >= cpuLimitSec {
-        return true
-    }
+	if total.Round(time.Duration(time.Second)) >= cpuLimitSec {
+		return true
+	}
 
-    return false
+	return false
 }
 
 func runSubprocess(args []string) (*os.ProcessState, int) {
@@ -84,74 +84,74 @@ func runSubprocess(args []string) (*os.ProcessState, int) {
 		}
 	}(signalChan)
 
-    err := subprocess.Run()
-    state := subprocess.ProcessState
-    if err != nil {
+	err := subprocess.Run()
+	state := subprocess.ProcessState
+	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
 			return state, exitError.ExitCode()
 		}
 
-        return state, 1
-    }
+		return state, 1
+	}
 
 	return state, 0
 }
 
 func setCpuLimit(limitSec uint64) error {
-    var limit = syscall.Rlimit{Cur: limitSec, Max: limitSec}
-    return syscall.Setrlimit(syscall.RLIMIT_CPU, &limit)
+	var limit = syscall.Rlimit{Cur: limitSec, Max: limitSec}
+	return syscall.Setrlimit(syscall.RLIMIT_CPU, &limit)
 }
 
 func writeStats(stats *cgroups.Stats, outputPath string) error {
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
-        return err
+		return err
 	}
 	defer outputFile.Close()
 
 	statsJson, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
-        return err
+		return err
 	}
 
 	_, err = outputFile.Write(statsJson)
-    return err
+	return err
 }
 
 func main() {
 	outputPath := flag.String("o", "/golem/stats/cgroups_stats.json", "path to output file")
 	subsystems := flag.String("s", defaultSubsystems,
 		"cgroup subsystems to be included in the stats (as comma-separated strings)")
-    cpuLimit := flag.Uint64("l", math.MaxUint64, "CPU usage limit for the subprocess (in seconds)")
+	cpuLimit := flag.Uint64("l", math.MaxUint64, "CPU usage limit for the subprocess (in seconds)")
 
-    if len(os.Args) == 1 {
-        fmt.Fprintf(os.Stderr, "Usage:\n")
-        flag.PrintDefaults()
-        os.Exit(exitCodeEmptyArgs)
-    }
+	if len(os.Args) == 1 {
+		fmt.Fprintf(os.Stderr, "Usage:\n")
+		flag.PrintDefaults()
+		os.Exit(exitCodeEmptyArgs)
+	}
 
 	flag.Parse()
 
-    err := setCpuLimit(*cpuLimit)
-    if err != nil {
-        printErr("Setting CPU limit failed. %s", err)
-    }
+	err := setCpuLimit(*cpuLimit)
+	if err != nil {
+		printErr("Setting CPU limit failed. %s", err)
+	}
 	state, exitCode := runSubprocess(flag.Args())
 
-    stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
-    if err != nil {
-        printErr("Could not obtain cgroups stats. %s", err)
-    } else {
-        err := writeStats(stats, *outputPath)
-        if err != nil {
-            printErr("Writing stats file failed. %s", err)
-        }
-    }
+	stats, err := getCgroupsStats(strings.Split(*subsystems, ","))
+	if err != nil {
+		printErr("Could not obtain cgroups stats. %s", err)
+	} else {
+		err := writeStats(stats, *outputPath)
+		if err != nil {
+			printErr("Writing stats file failed. %s", err)
+		}
+	}
 
-    if exitCode != 0 && isCpuLimitExceeded(state, *cpuLimit) {
-        printErr("CPU limit exceeded.")
-        os.Exit(exitCodeCpuLimitExceeded)
-    }
+	if exitCode != 0 && isCpuLimitExceeded(state, *cpuLimit) {
+		printErr("CPU limit exceeded.")
+		os.Exit(exitCodeCpuLimitExceeded)
+	}
 
-    os.Exit(exitCode)
+	os.Exit(exitCode)
 }
